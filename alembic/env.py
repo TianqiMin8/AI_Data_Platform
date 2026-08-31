@@ -1,13 +1,28 @@
 from logging.config import fileConfig
+import os
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+from dotenv import load_dotenv
+import os
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+#####################
+load_dotenv()
+
+database_url = os.getenv("DATABASE_URL")
+
+if database_url is None:
+    raise RuntimeError("DATABASE_URL is not set")
+
+config.set_main_option("sqlalchemy.url", database_url)
+
+######################
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -24,6 +39,15 @@ target_metadata = None
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
+# add this 8/31/2026
+from app.models.base import Base
+from app.config.settings import get_settings
+
+settings = get_settings()
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+target_metadata = Base.metadata
+##
 
 
 def run_migrations_offline() -> None:
@@ -79,9 +103,3 @@ else:
 
 
 
-from app.models.base import Base
-from app.config.settings import get_settings
-
-settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
-target_metadata = Base.metadata

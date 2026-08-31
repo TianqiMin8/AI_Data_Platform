@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.config.settings import get_settings
+from fastapi.responses import JSONResponse
 
 router = APIRouter(tags=["health"])
 
@@ -21,6 +22,18 @@ async def health_check():
 
 @router.get("/health/db")
 async def health_check_db(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(text("SELECT 1"))
-    row = result.scalar()
-    return {"status": "ok", "db": row == 1}
+    # When database has connection error, return real error message
+    try:
+        result = await db.execute(text("SELECT 1"))
+        row = result.scalar()
+        return {"status": "ok", "db": row == 1}
+    
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "db": False,
+                "error": str(e),
+            },
+        )
