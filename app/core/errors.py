@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 class AppError(Exception):
     """所有业务异常的基类。"""
@@ -71,6 +71,28 @@ def register_exception_handlers(app: FastAPI):
                 }
             },
         )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        request_id = getattr(request.state, "request_id", "")
+
+        logger.warning(
+            "http.error",
+            status_code=exc.status_code,
+            error_message=str(exc.detail),
+        )
+
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": f"HTTP_{exc.status_code}",
+                    "message": str(exc.detail),
+                    "request_id": request_id,
+                }
+            },
+        )
+
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
