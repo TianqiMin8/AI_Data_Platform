@@ -1,0 +1,43 @@
+1-1
+- 健康检查接口应该需要认证吗？为什么？
+    一般不需要。健康接口一般是给机器访问检查的，如果增加认证回增加其复杂度。
+- K8s 的 liveness probe 和 readiness probe 有什么区别？健康检查应该对应哪个？
+    Liveness probe是程序的状态，比如是否卡死，是否能响应。
+    Readiness probe是已知程序没有卡死的状态下，是否能接收处理用户的请求。比如api还可以运行但是数据库崩了，就不适合继续处理。
+    健康检查应该
+
+1-2
+- 为什么 HTTPException 和 StarletteHTTPException 是两个不同的类？它们的关系是什么？
+    Fastapi的 HTTPException 是继承自 starlette的StarletteHTTPException 。fastapi的 HTTPException 增加了一些更适合API的类型定义。
+    在使用中，HTTPException是需要自己手动抛出的，如
+        raise HTTPException(
+        status_code=404,
+        detail="User not found"
+    )，但如果你没有定义此，会自动产生StarletteHTTPException的exception。
+
+1-3
+- 如果这个接口以后要支持 WebSocket 调用，你的 Service 层代码需要改吗？为什么？
+    不用。因为 service 层只存放业务逻辑（接收message，处理，返回结果），不会关注 message 的来源。
+    加 websocket 只需要新增一个接口就行。
+
+1-4
+- 为什么生产环境一定要用 JSON 格式日志？
+    因为JSON格式方便机器解析，搜索和过滤。
+- 如果日志量非常大（每秒 10000 条），你会怎么优化？
+    不记录如DEBUG之类的低级别日志，只保留ERROR/WARNING，省略记录 request/response body。
+    
+
+1-5
+1. 如果你的项目只有 3 个接口、2 个月后就下线，你还会做这么完整的分层吗？在什么条件下你会选择 “简单版”（一个 main.py 搞定）？
+    不会。如果已经确定接口少，且两个月后就下线并且不会扩展成更大的项目，那就没有必要写完整的分层浪费时间。
+2. `get_settings()` 用了 `@lru_cache`，如果运行时修改了 `.env` 文件，不重启服务能生效吗？如果需要热更新配置，你会怎么设计？
+    不能。因为cache的功能是缓存，它会缓存之前运行Setting的对象，如果不重启服务器，就算修改了 .env 文件，调用时返回的还是存在cache里的对象
+    如果需要热更新配置，可以定时（如每30秒）检查config server， 看有没有更新的参数。
+3. 本节课的目录结构中，`llm/`、`sql_engine/`、`rag/` 是并列的三个目录。如果将来需要一个 “混合查询” 功能（先查数据库再查文档），这个功能的代码应该放在哪里？为什么？
+    我觉得应该放在主目录里，这样可以方便地查询数据库和文档的内容。
+4. structlog 的 `contextvars` 在异步场景下是协程安全的，但如果你用了 `threading` 起了一个后台线程，request_id 还能透传吗？怎么解决？
+    应该不能。可以手动传递之前主线程的 requestid 到新线程，明确这个人物属于这个id。
+5. 本节课的异常体系中，`LLMError` 的 HTTP 状态码是 502。为什么是 502 而不是 500？如果 LLM 返回的不是超时而是 “内容违规被过滤”，应该用什么状态码？
+    因为 FASTAPI调用了外部的LLM，所以LLMERROR的状态码指的是自己没问题，但是请求上游服务（LLM）时出了问题。500则是自己本身出现了问题。
+    如果是内容被过滤，应该用400 （Bad Request）。
+

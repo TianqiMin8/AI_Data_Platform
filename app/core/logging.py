@@ -17,7 +17,7 @@ def setup_logging():
         structlog.processors.UnicodeDecoder(),
     ]
 
-    if settings.log_format == "json":
+    if settings.environment == "prod":
         renderer = structlog.processors.JSONRenderer()
     else:
         # 开发环境用可读格式
