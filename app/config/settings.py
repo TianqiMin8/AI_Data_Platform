@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # ── LLM ──
     openai_api_key: str = ""
     openai_model: str = "gpt-4o"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_temperature: float = 0.0
+    openai_max_tokens: int = 2048
+    openai_timeout: float = 30.0
 
     # ── Logging ──
     log_level: str = "INFO"

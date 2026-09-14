@@ -1,4 +1,9 @@
 1-1
+### 补全数据库健康检查的错误处理
+    要求：
+    - 修改 `/api/v1/health/db`，当数据库连接失败时返回 `{"status": "unhealthy", "db": false, "error": "..."}`，HTTP 状态码为 503
+    - 不要让数据库连接失败变成 500 Internal Server Error
+
 - 健康检查接口应该需要认证吗？为什么？
     一般不需要。健康接口一般是给机器访问检查的，如果增加认证回增加其复杂度。
 - K8s 的 liveness probe 和 readiness probe 有什么区别？健康检查应该对应哪个？
@@ -7,6 +12,12 @@
     健康检查应该
 
 1-2
+### 让 404 也走统一错误格式
+    当前访问不存在的路径返回的是 FastAPI 默认格式 `{"detail": "Not Found"}`。
+    要求：
+    - 注册一个 `StarletteHTTPException` 的全局 handler
+    - 让 404 / 405 等框架级异常也返回 `{"error": {"code": "...", "message": "...", "request_id": "..."}}` 格式
+
 - 为什么 HTTPException 和 StarletteHTTPException 是两个不同的类？它们的关系是什么？
     Fastapi的 HTTPException 是继承自 starlette的StarletteHTTPException 。fastapi的 HTTPException 增加了一些更适合API的类型定义。
     在使用中，HTTPException是需要自己手动抛出的，如
@@ -16,11 +27,24 @@
     )，但如果你没有定义此，会自动产生StarletteHTTPException的exception。
 
 1-3
+### 添加一个 `/api/v1/echo` 接口
+    要求：
+    - 接收 POST 请求，body 为 `{"message": "hello"}`
+    - 返回 `{"data": {"echo": "hello", "timestamp": "..."}, "request_id": "..."}`
+    - 如果 `message` 为空，抛 `ValidationError`
+    - 在 Service 层实现业务逻辑，API 层只做参数传递
+
 - 如果这个接口以后要支持 WebSocket 调用，你的 Service 层代码需要改吗？为什么？
     不用。因为 service 层只存放业务逻辑（接收message，处理，返回结果），不会关注 message 的来源。
     加 websocket 只需要新增一个接口就行。
 
 1-4
+### 实现分环境日志格式切换
+    要求：
+    - `ENVIRONMENT=dev` 时，日志输出可读格式（带颜色）
+    - `ENVIRONMENT=prod` 时，日志输出 JSON 格式
+    - 验证方法：修改 `.env`，重启服务，观察日志格式变化
+
 - 为什么生产环境一定要用 JSON 格式日志？
     因为JSON格式方便机器解析，搜索和过滤。
 - 如果日志量非常大（每秒 10000 条），你会怎么优化？
