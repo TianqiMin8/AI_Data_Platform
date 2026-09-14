@@ -26,11 +26,35 @@
 
 2-4
 - 如果你需要更换 encryption_key（key 轮转），你会怎么做？写出完整的步骤
-
-- 提示：你不能直接改 key，因为旧数据是用旧 key 加密的，新 key 解不开
+  提示：你不能直接改 key，因为旧数据是用旧 key 加密的，新 key 解不开
+    1. 生成新的Fernet key：new_key，在轮转期间也保留old_key
+    2. 读取数据库中所有由old_key加密的密码
+    3. 对每条数据：用old_key解密，用new_key加密，将新密文写回数据库
+    4. 随机取样数据，确认可以用new_key解密
+    5. 将应用的主加密key换成new_key
+    6. 再次确认所有实例用的是new_key，没有依赖old_key的数据
+    7. 禁用old_key
 
 - 生产环境中，加密 key 应该存在哪里？（提示：不是 `.env` 文件）
-
+    放在专门的secret management里，如AWS KMS / AWS Secrets Manager，在应用启动时通过运行环境的身份和权限取读取密钥。
 
 2-5
+1. 本节课的数据模型中，`Conversation.datasource_id` 是 nullable 的。这意味着一个对话可以不关联数据源。想一想：什么场景下对话不需要数据源？（提示：这个平台不只有 Text-to-SQL）
+    对话不一定要连接数据库，也可能只是普通使用llm来进行问答。如上传PDF文件行让llm分析就不用关联数据库。
+
+2. `Message.role` 用的是字符串而不是数据库 Enum。如果用 Enum，加一个新 role（比如 `tool`）需要做什么？用字符串呢？哪种方式在迭代速度上更有优势？
+    如果用Enum，加一个新role需要修改数据库Enum的类型，并执行数据库migration和可能要修改schema。
+    用string的话数据库结构本身不需要改变，只需要修改应用层代码，使系统能识别和处理新role。
+    所以string在迭代速度上更有优势。
+
+3. `QueryExecution.result_summary` 存的是摘要而不是完整结果集。如果一条 SQL 查出来 50000 行数据，完整结果应该存在哪里？怎么让前端能分页展示？
+    完整结果应该存在其他文件存储系统如google cloud中，并保存位csv，json或者parquet文件。
+    如果希望前端分页展示结果，也可以把结果放在专门的结果存储中，然后提供分页 API，例如：GET /query-executions/{id}/results?cursor=xxx&limit=100，前端第一次只获取前 100 行，用户继续翻页时再请求下一批数据
+
+4. 本节课的认证用的是 JWT（无状态）。如果用户改了密码，已经签发的 Token 还有效吗？如果你想实现 “改密码后让所有旧 Token 失效”，你会怎么设计？
+    一般有效。JWT是无状态，所以服务器验证只会检查token的签名和国企时间，不会检查这个token是否在用户修改密码前发的。
+    如果要实现改密码后让所有旧 Token 失效，可以在在 User 表中保存：password_changed_at，然后用它和token.iat比较，如果token.iat < user.password_changed_at， 说明 Token 是在密码修改之前签发的，可以拒绝该 Token。
+
+5. Schema 自省目前是同步阻塞的。如果用户的外部数据库有 1000 张表，自省可能要 30 秒。这时候怎么办？（提示：参考课程大纲中的 “异步任务” 模块）
+    用户请求 Schema 自省 -> API 创建异步任务 -> 立即返回 task_id -> 任务队列 -> Worker 执行 Schema introspection -> 保存结果 -> 前端获取任务状态 / Schema
 
