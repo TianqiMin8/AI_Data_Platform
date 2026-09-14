@@ -39,6 +39,20 @@ class PermissionDeniedError(AppError):
     def __init__(self, message: str = "权限不足"):
         super().__init__(code="PERMISSION_DENIED", message=message, status_code=403)
 
+class LLMError(AppError):
+        def __init__(self, message: str = "LLM 服务暂时不可用"):
+            super().__init__(code="LLM_ERROR", message=message, status_code=502)
+
+
+class SQLGenerationError(AppError):
+    def __init__(self, message: str = "SQL 生成失败"):
+        super().__init__(code="SQL_GENERATION_ERROR", message=message, status_code=500)
+
+
+class SQLExecutionError(AppError):
+    def __init__(self, message: str = "SQL 执行失败"):
+        super().__init__(code="SQL_EXECUTION_ERROR", message=message, status_code=500)
+
 
 # app/core/errors.py 追加
 
@@ -115,18 +129,5 @@ def register_exception_handlers(app: FastAPI):
         )
 
 
-    class LLMError(AppError):
-        def __init__(self, message: str = "LLM 服务暂时不可用"):
-            super().__init__(code="LLM_ERROR", message=message, status_code=502)
-
-
-    class SQLGenerationError(AppError):
-        def __init__(self, message: str = "SQL 生成失败"):
-            super().__init__(code="SQL_GENERATION_ERROR", message=message, status_code=500)
-
-
-    class SQLExecutionError(AppError):
-        def __init__(self, message: str = "SQL 执行失败"):
-            super().__init__(code="SQL_EXECUTION_ERROR", message=message, status_code=500)
-
+    
             
