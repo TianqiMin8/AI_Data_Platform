@@ -30,14 +30,22 @@ async def create_datasource(
 
 @router.get("", response_model=DataSourceListResponse)
 async def list_datasources(
-    skip: int = Query(0, ge=0),
+    cursor: int | None = Query(None, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    items, total = await ds_service.list_datasources(db, current_user, skip, limit)
-    return DataSourceListResponse(items=items, total=total)
+    items, next_cursor = await ds_service.list_datasources(
+        db,
+        current_user,
+        cursor,
+        limit,
+    )
 
+    return DataSourceListResponse(
+        items=items,
+        next_cursor=next_cursor,
+    )
 
 @router.delete("/{datasource_id}", status_code=204)
 async def delete_datasource(

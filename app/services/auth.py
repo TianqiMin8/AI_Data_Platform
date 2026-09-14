@@ -6,6 +6,7 @@ from app.schemas.auth import RegisterRequest
 from app.core.security import hash_password, verify_password, create_access_token
 from app.core.errors import ValidationError, NotFoundError
 from app.core.logging import get_logger
+from sqlalchemy.exc import IntegrityError
 
 logger = get_logger(__name__)
 
@@ -23,7 +24,11 @@ async def register_user(db: AsyncSession, req: RegisterRequest) -> User:
         nickname=req.nickname or req.email.split("@")[0],
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise ValidationError("该邮箱已注册")
 
     logger.info("user.registered", user_id=user.id, email=user.email)
     return user

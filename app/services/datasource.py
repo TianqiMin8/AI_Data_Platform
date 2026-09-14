@@ -68,27 +68,37 @@ async def create_datasource(
 
 
 async def list_datasources(
-    db: AsyncSession, user: User, skip: int = 0, limit: int = 20
-) -> tuple[list[DataSource], int]:
-    # 查询总数
-    count_stmt = select(func.count()).select_from(DataSource).where(
-        DataSource.user_id == user.id,
-        DataSource.is_active == True,
-    )
-    total = (await db.execute(count_stmt)).scalar()
+    db: AsyncSession,
+    user: User,
+    cursor: int | None = None,
+    limit: int = 20,
+) -> tuple[list[DataSource], int | None]:
 
-    # 查询列表
     stmt = (
         select(DataSource)
-        .where(DataSource.user_id == user.id, DataSource.is_active == True)
-        .order_by(DataSource.created_at.desc())
-        .offset(skip)
-        .limit(limit)
+        .where(
+            DataSource.user_id == user.id,
+            DataSource.is_active == True,
+        )
+        .order_by(DataSource.id.desc())
     )
+
+    if cursor is not None:
+        stmt = stmt.where(DataSource.id < cursor)
+
+    # 多取一条，用来判断是否还有下一页
+    stmt = stmt.limit(limit + 1)
+
     result = await db.execute(stmt)
     items = list(result.scalars().all())
 
-    return items, total
+    next_cursor = None
+
+    if len(items) > limit:
+        items = items[:limit]
+        next_cursor = items[-1].id
+
+    return items, next_cursor
 
 
 async def get_datasource(db: AsyncSession, user: User, datasource_id: int) -> DataSource:

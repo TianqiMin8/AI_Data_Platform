@@ -26,10 +26,10 @@ class DataSourceResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
+# Update to return "next_cursor"
 class DataSourceListResponse(BaseModel):
     items: list[DataSourceResponse]
-    total: int
+    next_cursor: int | None = None
 
 
 class ConnectionTestResponse(BaseModel):
