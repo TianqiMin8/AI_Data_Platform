@@ -6,7 +6,12 @@ from app.models.user import User
 from app.models.datasource import DataSource
 from app.models.conversation import Conversation, Message
 from app.models.query_execution import QueryExecution
-from app.schemas.chat import ChatResponse, QueryResult
+from app.schemas.chat import (
+    ChatResponse,
+    QueryResult,
+    MessageHistoryItem,
+    ConversationListItem,
+)
 from app.schemas.datasource import TableSchema
 from app.services.datasource import get_datasource
 from app.services.schema_inspector import introspect
@@ -48,6 +53,48 @@ async def get_conversation(
         raise NotFoundError("对话", conversation_id)
     return conv
 
+async def get_conversation_messages(
+    db: AsyncSession,
+    user: User,
+    conversation_id: int,
+) -> list[MessageHistoryItem]:
+    """获取一个对话的所有消息，并附带 QueryExecution 信息。"""
+
+    # 1. 先确认这个 conversation 属于当前用户
+    conv = await get_conversation(db, user, conversation_id)
+
+    # 2. 查询这个 conversation 下的所有消息
+    # 同时 LEFT JOIN QueryExecution
+    stmt = (
+        select(Message, QueryExecution)
+        .outerjoin(
+            QueryExecution,
+            QueryExecution.message_id == Message.id,
+        )
+        .where(Message.conversation_id == conv.id)
+        .order_by(Message.created_at.asc())
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # 3. 组装返回结果
+    items = []
+
+    for message, execution in rows:
+        items.append(
+            MessageHistoryItem(
+                id=message.id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                generated_sql=execution.generated_sql if execution else None,
+                execution_ms=execution.execution_ms if execution else None,
+                row_count=execution.row_count if execution else None,
+            )
+        )
+
+    return items
 
 async def send_message(
     db: AsyncSession, user: User, conversation_id: int, question: str
@@ -153,3 +200,67 @@ def _format_answer(question: str, sql: str, result: dict) -> str:
     summary += f"。\n\n执行的 SQL：\n```sql\n{sql}\n```"
 
     return summary
+
+async def list_conversations(
+    db: AsyncSession,
+    user: User,
+    cursor: int | None = None,
+    limit: int = 20,
+) -> tuple[list[ConversationListItem], int | None]:
+
+    stmt = (
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .order_by(
+            Conversation.updated_at.desc(),
+            Conversation.id.desc(),
+        )
+    )
+
+    if cursor is not None:
+        stmt = stmt.where(Conversation.id < cursor)
+
+    stmt = stmt.limit(limit + 1)
+
+    result = await db.execute(stmt)
+    conversations = list(result.scalars().all())
+
+    next_cursor = None
+
+    if len(conversations) > limit:
+        conversations = conversations[:limit]
+        next_cursor = conversations[-1].id
+
+    items = []
+
+    for conv in conversations:
+        last_msg_stmt = (
+            select(Message)
+            .where(Message.conversation_id == conv.id)
+            .order_by(
+                Message.created_at.desc(),
+                Message.id.desc(),
+            )
+            .limit(1)
+        )
+
+        last_msg_result = await db.execute(last_msg_stmt)
+        last_message = last_msg_result.scalar_one_or_none()
+
+        preview = None
+
+        if last_message:
+            preview = last_message.content[:100]
+
+        items.append(
+            ConversationListItem(
+                id=conv.id,
+                datasource_id=conv.datasource_id,
+                title=conv.title,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+                last_message_preview=preview,
+            )
+        )
+
+    return items, next_cursor

@@ -38,3 +38,39 @@ class ChatResponse(BaseModel):
     query_result: Optional[QueryResult] = None
     model: str = ""
     usage: Optional[dict] = None
+
+
+
+from datetime import datetime
+from pydantic import BaseModel
+
+class MessageHistoryItem(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    generated_sql: str | None = None
+    execution_ms: float | None = None
+    row_count: int | None = None
+
+
+class MessageHistoryResponse(BaseModel):
+    items: list[MessageHistoryItem]
+
+from datetime import datetime
+from pydantic import BaseModel
+
+
+class ConversationListItem(BaseModel):
+    id: int
+    datasource_id: int | None
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    last_message_preview: str | None = None
+
+
+class ConversationListResponse(BaseModel):
+    items: list[ConversationListItem]
+    next_cursor: int | None = None
