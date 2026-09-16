@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 
 from app.config.settings import get_settings
 
@@ -45,13 +45,45 @@ def decode_access_token(token: str) -> int | None:
 
 # ── 对称加密（用于数据库密码） ──
 
-def encrypt_value(plain_text: str) -> str:
+def _get_fernet() -> MultiFernet:
     settings = get_settings()
-    f = Fernet(settings.encryption_key.encode())
+
+    keys = [settings.encryption_key]
+
+    if settings.encryption_old_keys:
+        old_keys = [
+            key.strip()
+            for key in settings.encryption_old_keys.split(",")
+            if key.strip()
+        ]
+        keys.extend(old_keys)
+
+    fernets = [
+        Fernet(key.encode())
+        for key in keys
+    ]
+
+    return MultiFernet(fernets)
+
+
+def encrypt_value(plain_text: str) -> str:
+    """
+    使用当前 primary key 加密。
+    MultiFernet.encrypt() 永远使用第一个 key。
+    """
+    if not plain_text:
+        return plain_text
+
+    f = _get_fernet()
     return f.encrypt(plain_text.encode()).decode()
 
 
 def decrypt_value(encrypted_text: str) -> str:
-    settings = get_settings()
-    f = Fernet(settings.encryption_key.encode())
+    """
+    解密时依次尝试当前 key 和旧 key。
+    """
+    if not encrypted_text:
+        return encrypted_text
+
+    f = _get_fernet()
     return f.decrypt(encrypted_text.encode()).decode()

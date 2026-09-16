@@ -41,6 +41,7 @@ class Settings(BaseSettings):
 
     # ── Encryption ──
     encryption_key: str = ""  # Fernet key，用于加密数据库密码
+    encryption_old_keys: str = ""  # 旧的 Fernet key，用于解密数据库密码，多个 key 用逗号分隔
 
     # ── SQL Engine ──
     sql_max_rows: int = 100
