@@ -25,7 +25,8 @@ dependencies = [
     "email-validator (>=2.3.0,<3.0.0)",
     "bcrypt (<5)",
     "openai (>=3.13.0,<4.0.0)",
-    "tiktoken (>=0.14.0,<0.15.0)"
+    "tiktoken (>=0.14.0,<0.15.0)",
+    "sqlglot (>=30.18.0,<31.0.0)"
 ]
 
 

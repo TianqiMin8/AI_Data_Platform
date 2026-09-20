@@ -1,0 +1,68 @@
+4-1 
+### 实现列名校验（L2 扩展）
+要求：
+- 在 `validate_sql` 中新增列名校验：SQL 引用的列必须在 Schema 自省结果中存在
+- 需要新增参数 `allowed_columns: dict[str, list[str]]`（表名 → 列名列表）
+- 测试用例：故意在 SQL 里引用不存在的列名，验证被拦截
+
+思考题：
+- 如果用户用了 `SELECT *`，你怎么判断它引用了哪些列？
+
+- 如果 SQL 里有列别名（`AS total_sales`），别名不在原始 Schema 里，你会怎么处理？
+
+
+4-2
+### 实现错误自修复（retry with feedback）
+要求：
+- 当 SQL 执行失败时（如语法错误），把错误信息反馈给 LLM，让它重新生成 SQL
+- 最多重试 2 次
+- 每次重试都要经过安全校验
+- 在 QueryExecution 中记录重试次数
+
+思考题：
+- 如果 LLM 连续 3 次都生成有语法错误的 SQL，你怎么告诉用户？直接说 “生成失败” 还是给出更具体的建议？
+
+- 重试会增加 LLM 调用次数（成本）。怎么控制重试成本？
+
+
+
+4-3
+### 用异常类型替代字符串匹配做错误分类
+当前 `_classify_error` 是字符串匹配 `"syntax error" in error_msg`。
+要求：
+- 用 `psycopg2.errors` 的具体异常类型（如 `SyntaxError`、`UndefinedTable`、`InsufficientPrivilege`）来分类
+- 对比字符串匹配和异常类型匹配的准确率差异
+
+思考题：
+- 如果用户的数据库是 MySQL 而不是 PostgreSQL，`psycopg2.errors` 还能用吗？你怎么做跨数据库的错误分类？
+
+
+4-4
+### 给安全校验加敏感列过滤
+要求：
+- 新增配置项 `SQL_SENSITIVE_COLUMNS`（如 `["password", "ssn", "salary", "credit_card"]`）
+- 如果 SQL 引用了敏感列，拦截并提示 “该列包含敏感信息，不允许查询”
+- 支持全局配置和 per-DataSource 配置
+
+思考题：
+- 如果列名是 `pwd` 而不是 `password`，你的关键字匹配还有效吗？
+
+- 更好的方案是什么？（提示：基于列的 `comment` 或类型来判断，而不是列名）
+
+
+4-5
+1. 当前安全校验只拦截了 “LLM 生成的危险 SQL”。但如果攻击者直接调你的 API，在 `message` 字段里传入 `"; DROP TABLE users; --"`，你的系统会怎么处理？（提示：这不是 Prompt Injection，是经典 SQL Injection。你的代码是否安全？）
+    安全。因为这个messahe是作为自然语言给LLM让LLM生成SQL指令的，所以validate_sql还是会拦截危险的指令的。
+
+2. `sqlglot.parse()` 如果遇到非常长的 SQL（比如 100KB），解析时间可能很长。你怎么防止恶意用户用超长 SQL 做 DoS 攻击？
+    可以设置一个SQL长度限制，避免非常长的SQL进入解析器。也可以设置超时系统，时间太长就停止运行。
+
+3. 当前的 `allowed_tables` 来自 Schema 自省。如果用户的数据库有 `pg_catalog` 系统表，自省是否会把系统表也列出来？如果会，L2 校验还安全吗？
+    如果 Schema 自省把 pg_catalog、information_schema 等系统表也加入 allowed_tables，那么当前的 L2 校验就不够安全。因为 L2 只检查 SQL 中引用的表是否存在于白名单中，如果系统表本身也在白名单里，就可能被正常放行。因此，在 Schema 自省阶段就应该排除系统 schema，只保留真正允许用户访问的业务表，例如 PostgreSQL 中通常只允许 public schema，或者由系统显式配置允许访问的 schema。
+
+4. LLM 自然语言解释目前是 “每次多调一次 API”。如果要把解释结果缓存起来（同样的 SQL + 同样的结果 → 同样的解释），你会用什么做 cache key？纯用 SQL 文本够吗？
+    不，因为纯SQL文本可能到时相同SQL在不同时间执行时数据库中的数据变化而产生不同结果。cachekey可以用标准化的SQL+查询结果作为cachekey，更加保险。
+
+5. 本节课的安全校验是 **事后拦截**（LLM 先生成 SQL，然后校验）。有没有 **事前预防** 的方案？（提示：能不能让 LLM 根本生成不出 DELETE？Function Calling / Structured Output 了解一下）
+    可以一个模板，让llm按照预先定义好的结构返回查询意图。例如，可以限制模型只能返回 SELECT 类型的操作，并且只能从允许的表名、列名、聚合函数和排序方式中选择。后端再根据这个结构生成真正的 SQL。
+

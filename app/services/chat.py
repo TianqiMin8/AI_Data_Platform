@@ -131,11 +131,69 @@ async def send_message(
         db_type=ds.db_type,
     )
 
+    # ✅ 4.5 新增：SQL 安全校验
+    from app.sql_engine.validator import validate_sql, ValidationResult
+
+    allowed_table_names = [t["table_name"] for t in schema_tables]
+    validation = validate_sql(
+        sql=sql,
+        allowed_tables=allowed_table_names,
+        db_type=ds.db_type,
+    )
+
+    if not validation.is_safe:
+        logger.warning(
+            "sql.validation.blocked",
+            level=validation.level,
+            reason=validation.reason,
+            sql=sql[:200],
+        )
+
+        # 存一条 assistant 消息告知用户
+        block_message = f"抱歉，生成的查询未通过安全校验：{validation.reason}。请换一种方式描述您的问题。"
+        assistant_msg = Message(
+            conversation_id=conv.id,
+            role="assistant",
+            content=block_message,
+        )
+        db.add(assistant_msg)
+        await db.flush()
+
+        # 存 QueryExecution（记录被拦截的 SQL）
+        qe = QueryExecution(
+            message_id=assistant_msg.id,
+            datasource_id=ds.id,
+            generated_sql=sql,
+            status="blocked",
+            error_message=f"[{validation.level}]{validation.reason}:{validation.blocked_detail}",
+        )
+        db.add(qe)
+        await db.flush()
+
+        return ChatResponse(
+            message_id=assistant_msg.id,
+            content=block_message,
+            generated_sql=sql,
+            query_result=None,
+            model=llm_response.model,
+            usage={
+                "prompt_tokens": llm_response.usage.prompt_tokens,
+                "completion_tokens": llm_response.usage.completion_tokens,
+            },
+        )
+
     # 5. 执行 SQL
     exec_result = execute_sql(ds, sql)
 
-    # 6. 构造自然语言回答
-    answer = _format_answer(question, sql, exec_result)
+    # ✅ 6. 升级：用 LLM 生成自然语言解释
+    from app.sql_engine.explainer import explain_result
+
+    answer = await explain_result(
+        question=question,
+        sql=sql,
+        rows=exec_result.rows,
+        row_count=exec_result.row_count,
+    )
 
     # 7. 存 assistant 消息
     assistant_msg = Message(

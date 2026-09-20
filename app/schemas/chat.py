@@ -36,6 +36,8 @@ class ChatResponse(BaseModel):
     content: str
     generated_sql: Optional[str] = None
     query_result: Optional[QueryResult] = None
+    blocked: bool = False                        # ← 新增
+    block_reason: Optional[str] = None           # ← 新增
     model: str = ""
     usage: Optional[dict] = None
 
