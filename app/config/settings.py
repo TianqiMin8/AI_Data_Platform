@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     chunk_overlap: int = 50
     max_file_size_mb: int = 20
 
+    # ── Re-ranking ──
+    rerank_method: str = "cross_encoder"            # cross_encoder / llm
+    cross_encoder_model: str = "BAAI/bge-reranker-base"
+
+    # ── Embedding 缓存 ──
+    embedding_cache_enabled: bool = True
+    # 同一模型下同一段文本的向量不会变，TTL 只用于控制内存；None 表示永不过期
+    embedding_cache_ttl_seconds: int | None = 30 * 24 * 3600
+
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 3600  # 缓存 1 小时
 

@@ -8,6 +8,8 @@ class SearchRequest(BaseModel):
     document_ids: list[int] | None = None
     search_method: str = Field("hybrid", pattern="^(vector|bm25|hybrid)$")
     rerank: bool = True
+    # 不传时使用配置 RERANK_METHOD（默认 cross_encoder）
+    rerank_method: str | None = Field(None, pattern="^(llm|cross_encoder)$")
 
 
 class SearchResultItem(BaseModel):

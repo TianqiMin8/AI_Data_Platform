@@ -1,0 +1,52 @@
+[
+  {
+    "question": "无理由退货的期限是几天？",
+    "answer_contains": "购买商品后七天内",
+    "type": "原文用词"
+  },
+  {
+    "question": "东西用坏了可以换个新的吗？要在多久之内？",
+    "answer_contains": "商品签收后十五天内出现性能故障",
+    "type": "换了说法"
+  },
+  {
+    "question": "空调压缩机保修几年？",
+    "answer_contains": "主要部件（压缩机、电机）保修六年",
+    "type": "具体数字"
+  },
+  {
+    "question": "手机掉进水里坏了能免费修吗？",
+    "answer_contains": "人为损坏、进水、私自拆机维修",
+    "type": "换了说法"
+  },
+  {
+    "question": "当日达支持哪些城市？",
+    "answer_contains": "北京、上海、广州、深圳四个城市支持当日达",
+    "type": "原文用词"
+  },
+  {
+    "question": "只买五十块钱的东西要付运费吗？",
+    "answer_contains": "不满九十九元收取十元运费",
+    "type": "具体数字"
+  },
+  {
+    "question": "积分能当钱用吗？怎么换算？",
+    "answer_contains": "一百积分可以抵扣一元",
+    "type": "换了说法"
+  },
+  {
+    "question": "电子发票多久能收到？",
+    "answer_contains": "电子发票会在七十二小时内发送到预留邮箱",
+    "type": "原文用词"
+  },
+  {
+    "question": "刚买完没几天就降价了，亏了怎么办？",
+    "answer_contains": "可以申请价格保护，我们会退还差价",
+    "type": "换了说法"
+  },
+  {
+    "question": "晚上十一点还能找到真人客服吗？",
+    "answer_contains": "人工客服的服务时间为每天早上八点到晚上十点",
+    "type": "换了说法"
+  }
+]
