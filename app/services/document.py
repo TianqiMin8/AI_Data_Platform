@@ -1,3 +1,4 @@
+import hashlib
 import os
 import tempfile
 from fastapi import UploadFile
@@ -13,12 +14,35 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-ALLOWED_TYPES = {"pdf", "txt", "md", "markdown", "docx"}
+ALLOWED_TYPES = {"pdf", "txt", "md", "markdown", "docx", "html", "htm"}
+
+
+async def find_reusable_document(
+    db: AsyncSession, user: User, content_hash: str
+) -> Document | None:
+    """查找该用户已成功处理过的、内容完全相同的文档。
+
+    只复用 completed 的：之前处理失败（例如 Embedding API 出错）的视为没上传过，需要重新处理。
+    只在同一用户内查找：不同用户的文档相互隔离，不能把别人的文档返回给你。
+    """
+    stmt = (
+        select(Document)
+        .where(
+            Document.user_id == user.id,
+            Document.content_hash == content_hash,
+            Document.status == "completed",
+        )
+        .order_by(Document.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def upload_document(
     db: AsyncSession, user: User, file: UploadFile
-) -> Document:
+) -> tuple[Document, bool]:
+    """上传并处理文档。返回 (文档, 是否为重复上传)。"""
     settings = get_settings()
 
     # 1. 校验文件类型
@@ -34,12 +58,26 @@ async def upload_document(
     if file_size > max_size:
         raise ValidationError(f"文件大小{file_size // 1024 // 1024}MB 超过限制{settings.max_file_size_mb}MB")
 
+    # 2.5 内容去重：按文件字节算哈希（与文件名无关），同一用户已处理过就直接返回
+    content_hash = hashlib.sha256(content).hexdigest()
+    existing = await find_reusable_document(db, user, content_hash)
+    if existing:
+        logger.info(
+            "document.duplicate_upload",
+            document_id=existing.id,
+            existing_filename=existing.filename,
+            uploaded_filename=filename,
+            user_id=user.id,
+        )
+        return existing, True
+
     # 3. 创建 Document 记录
     doc = Document(
         user_id=user.id,
         filename=filename,
         file_type=ext,
         file_size=file_size,
+        content_hash=content_hash,
         status="pending",
     )
     db.add(doc)
@@ -62,15 +100,24 @@ async def upload_document(
         if os.path.exists(temp_dir):
             os.rmdir(temp_dir)
 
-    logger.info(
-        "document.uploaded",
-        document_id=doc.id,
-        filename=filename,
-        file_type=ext,
-        chunk_count=doc.chunk_count,
-    )
+    # 处理失败时 process_document 不抛异常：文档以 failed 状态正常提交，用户能看到失败原因
+    if doc.status == "failed":
+        logger.warning(
+            "document.processing_failed",
+            document_id=doc.id,
+            filename=filename,
+            error=doc.error_message,
+        )
+    else:
+        logger.info(
+            "document.uploaded",
+            document_id=doc.id,
+            filename=filename,
+            file_type=ext,
+            chunk_count=doc.chunk_count,
+        )
 
-    return doc
+    return doc, False
 
 
 async def list_documents(

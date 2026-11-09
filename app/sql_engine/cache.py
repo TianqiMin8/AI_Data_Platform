@@ -42,11 +42,11 @@ async def set_cached_sql(
 
 
 async def invalidate_cache(datasource_id: int) -> None:
-    """清空某个数据源的所有缓存（Schema 变更时调用）。"""
+    """清空某个数据源的所有缓存（Schema 变更时调用），包括精确缓存和语义缓存。"""
     try:
         client = get_redis_client()
         pattern = f"sql_cache:{datasource_id}:*"
-        keys = []
+        keys = [f"sem_cache:{datasource_id}"]
         async for key in client.scan_iter(match=pattern):
             keys.append(key)
         if keys:

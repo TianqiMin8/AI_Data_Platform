@@ -11,6 +11,7 @@ class DataSourceCreate(BaseModel):
     database_name: str = Field(..., examples=["mydb"])
     username: str = Field(..., examples=["postgres"])
     password: str = Field(..., min_length=1)
+    sensitive_columns: list[str] = Field(default_factory=list, examples=[["phone", "id_card"]])
 
 
 class DataSourceResponse(BaseModel):
@@ -22,6 +23,7 @@ class DataSourceResponse(BaseModel):
     database_name: str
     username: str
     is_active: bool
+    sensitive_columns: list[str] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -63,3 +65,4 @@ class DataSourceUpdate(BaseModel):
     database_name: str | None = None
     username: str | None = None
     password: str | None = Field(None, min_length=1)
+    sensitive_columns: list[str] | None = None

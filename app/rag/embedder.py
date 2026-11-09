@@ -1,4 +1,7 @@
 import asyncio
+from functools import lru_cache
+
+import tiktoken
 from openai import AsyncOpenAI
 
 from app.config.settings import get_settings
@@ -6,6 +9,21 @@ from app.core.logging import get_logger
 from app.core.errors import AppError
 
 logger = get_logger(__name__)
+
+EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSIONS = 1536
+EMBEDDING_MAX_TOKENS = 8191  # text-embedding-3-small 单条输入的 token 上限
+
+
+@lru_cache
+def _embedding_encoding() -> tiktoken.Encoding:
+    # text-embedding-3-small 用 cl100k_base，和 gpt-4o 的 o200k_base 不同，必须按 Embedding 模型取编码器
+    return tiktoken.encoding_for_model(EMBEDDING_MODEL)
+
+
+def count_embedding_tokens(text: str) -> int:
+    """按 Embedding 模型的分词方式计算 token 数。"""
+    return len(_embedding_encoding().encode(text))
 
 
 class EmbeddingError(AppError):
@@ -22,8 +40,8 @@ class Embedder:
             api_key=settings.openai_api_key,
             timeout=30,
         )
-        self.model = "text-embedding-3-small"
-        self.dimensions = 1536
+        self.model = EMBEDDING_MODEL
+        self.dimensions = EMBEDDING_DIMENSIONS
         self.batch_size = 100  # OpenAI 一次最多 2048 条，但 100 条更稳
 
     async def embed_single(self, text: str) -> list[float]:

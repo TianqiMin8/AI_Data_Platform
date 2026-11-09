@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     openai_temperature: float = 0.0
     openai_max_tokens: int = 2048
     openai_timeout: float = 30.0
+    llm_context_window: int | None = None  # 不填则按模型名查表（gpt-4o = 128000）
+    prompt_context_ratio: float = 0.7      # Prompt 最多占 context window 的比例，其余留给输出
+    max_history_fetch_turns: int = 20      # 从数据库最多读取的历史轮数（再由 token 预算决定保留几轮）
 
     # ── Logging ──
     log_level: str = "INFO"
@@ -46,6 +49,9 @@ class Settings(BaseSettings):
     # ── SQL Engine ──
     sql_max_rows: int = 100
     sql_timeout_seconds: int = 15
+    # 全局敏感列关键字：列名包含其中任一关键字（不区分大小写）即视为敏感列
+    # .env 中用 JSON 数组配置：SQL_SENSITIVE_COLUMNS=["password","ssn","salary","credit_card"]
+    sql_sensitive_columns: list[str] = ["password", "ssn", "salary", "credit_card"]
 
     # ── Chunking ──
     chunk_strategy: str = "recursive"     # fixed / heading / recursive
@@ -55,6 +61,14 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 3600  # 缓存 1 小时
+
+    # ── 语义缓存 ──
+    semantic_cache_enabled: bool = True
+    semantic_cache_threshold: float = 0.95  # 余弦相似度高于该值才命中
+
+    # ── 缓存命中率监控 ──
+    cache_hit_rate_warn_threshold: float = 0.2  # 命中率低于该值输出 warning
+    cache_hit_rate_min_samples: int = 20        # 样本太少时命中率没有意义，不告警；也是告警的间隔
 
     @property
     def is_dev(self) -> bool:

@@ -1,5 +1,8 @@
 import time
+import psycopg2
+from psycopg2 import errors as pg_errors
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 
 from app.models.datasource import DataSource
 from app.services.datasource import _build_sync_url
@@ -86,8 +89,7 @@ def execute_sql(datasource: DataSource, sql: str) -> SQLExecutionResult:
         )
 
     except Exception as e:
-        error_msg = str(e).lower()
-        classified = _classify_error(error_msg, sql)
+        classified = _classify_error(e, sql)
 
         logger.error(
             "sql.execution_failed",
@@ -96,11 +98,89 @@ def execute_sql(datasource: DataSource, sql: str) -> SQLExecutionResult:
             error_type=classified["type"],
             error=str(e),
         )
-        raise SQLExecutionError(classified["message"])
+        raise SQLExecutionError(
+            classified["message"],
+            db_error=str(e),
+            error_type=classified["type"],
+        )
 
 
-def _classify_error(error_msg: str, sql: str) -> dict:
-    """将数据库报错分类为用户可读的错误信息。"""
+# PostgreSQL 异常类型 → (错误类型, 用户可读提示)
+# 顺序有意义：isinstance 按顺序匹配，子类要排在父类前面
+# （QueryCanceled 是 OperationalError 的子类，必须先于连接错误判断）
+PG_ERROR_TYPES: list[tuple[type[Exception], str, str]] = [
+    (pg_errors.SyntaxError, "syntax_error",
+     "生成的 SQL 语法错误，请尝试用不同的方式描述您的问题"),
+    (pg_errors.UndefinedTable, "undefined_table",
+     "查询引用了不存在的表，请确认数据源的表结构是否变更"),
+    (pg_errors.UndefinedColumn, "undefined_column",
+     "查询引用了不存在的字段，请确认数据源的表结构是否变更"),
+    (pg_errors.UndefinedFunction, "undefined_function",
+     "查询使用了不支持的函数或参数类型（例如对文本字段求和），请换一种方式描述您的问题"),
+    (pg_errors.AmbiguousColumn, "ambiguous_column",
+     "查询中的字段名有歧义（多张表有同名字段），请说明要查哪张表的字段"),
+    (pg_errors.GroupingError, "grouping_error",
+     "查询的分组方式有误，请尝试更明确地说明按什么维度统计"),
+    (pg_errors.DivisionByZero, "division_by_zero",
+     "计算中出现了除以零，请检查问题中的计算逻辑"),
+    (pg_errors.InvalidTextRepresentation, "type_mismatch",
+     "查询中的值与字段类型不匹配，请检查问题中的条件（如日期、数字格式）"),
+    (pg_errors.DatatypeMismatch, "type_mismatch",
+     "查询中的值与字段类型不匹配，请检查问题中的条件（如日期、数字格式）"),
+    (pg_errors.InsufficientPrivilege, "permission_denied",
+     "数据库用户权限不足，请检查数据源的数据库用户是否有 SELECT 权限"),
+    (pg_errors.QueryCanceled, "timeout",
+     "查询执行超时，请尝试缩小查询范围（如增加时间过滤条件）"),
+    (psycopg2.OperationalError, "connection_error",
+     "无法连接到数据库，请检查数据源的连接信息是否正确"),
+]
+
+# 错误类型 → 能否通过"把报错反馈给 LLM 重写 SQL"来修复
+ERROR_RECOVERABILITY: dict[str, bool] = {
+    # ── 可修复：SQL 本身写错了，LLM 看到报错能改对 ──
+    "syntax_error": True,        # 语法错误、方言不对（如 PostgreSQL 里用 QUARTER()）
+    "undefined_table": True,     # L2 已拦住不在 Schema 里的表，走到执行阶段多半是大小写/引号/schema 前缀问题
+    "undefined_column": True,
+    "undefined_function": True,  # 函数不存在或参数类型不对（SUM 文本列）
+    "ambiguous_column": True,    # 加表前缀即可
+    "grouping_error": True,      # 补 GROUP BY
+    "division_by_zero": True,    # 用 NULLIF 包一层
+    "type_mismatch": True,
+    "table_not_found": True,     # 非 PostgreSQL 时字符串匹配兜底的类型
+    "validation_failed": True,   # 重试中生成的 SQL 没过安全校验
+    "empty_sql": True,           # 重试中 LLM 没返回 SQL
+    # ── 不可修复：问题不在 SQL 上，重写多少次都一样 ──
+    "permission_denied": False,  # 数据库账号没权限
+    "connection_error": False,   # 数据库连不上
+    "timeout": False,            # 数据量/索引问题，重写往往还是慢，而且每次要再等一个超时
+    "unknown": False,            # 不认识的错误，不赌，省下 LLM 调用
+}
+
+
+def is_retryable(error_type: str) -> bool:
+    """未登记的错误类型一律按不可修复处理。"""
+    return ERROR_RECOVERABILITY.get(error_type, False)
+
+
+def _classify_error(exc: Exception, sql: str) -> dict:
+    """将数据库异常分类为用户可读的错误信息。
+
+    优先按 psycopg2 的具体异常类型判断；SQLAlchemy 会把驱动异常包一层，原始异常在 .orig 上。
+    拿不到 psycopg2 异常时（例如 MySQL 数据源），退回字符串匹配。
+    """
+    db_exc = exc.orig if isinstance(exc, DBAPIError) else exc
+
+    if isinstance(db_exc, psycopg2.Error):
+        for error_class, error_type, message in PG_ERROR_TYPES:
+            if isinstance(db_exc, error_class):
+                return {"type": error_type, "message": message}
+        return {"type": "unknown", "message": "查询执行失败，请稍后重试"}
+
+    return _classify_error_by_message(str(exc).lower(), sql)
+
+
+def _classify_error_by_message(error_msg: str, sql: str) -> dict:
+    """（旧实现）用字符串匹配做错误分类。保留用于非 PostgreSQL 数据源兜底，以及和异常类型分类做准确率对比。"""
 
     if "syntax error" in error_msg:
         return {

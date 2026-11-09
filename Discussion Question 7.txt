@@ -1,0 +1,57 @@
+7-1
+### 作业 1：实现 Embedding 缓存
+要求：
+- 对同一段文本（content hash 相同），不重复调用 Embedding API
+- 用 Redis 缓存：`embedding_cache:{sha256(content)[:16]}` → 序列化的向量
+- 文档重新导入时先查存
+思考题：
+- Embedding 缓存需要 TTL 吗？Embedding 模型不变的情况下，同一段文本的向量永远一样。
+- 如果换了 Embedding 模型（从 `text-embedding-3-small` 换到 `text-embedding-3-large`），缓存还能用吗？
+
+
+- 如果换了 Embedding 模型（从 `text-embedding-3-small` 换到 `text-embedding-3-large`），缓存还能用吗？
+
+
+
+7-2
+### 作业 2：实现按文档过滤的检索
+要求：
+- 当 `SearchRequest.document_ids` 不为空时，只在指定文档的 chunks 中检索
+- 验证：上传两个不同文档，搜索时指定其中一个的 ID，确认只返回那个文档的 chunks
+
+思考题：
+
+- 如果用户想搜索 “某个文件夹下的所有文档”，当前的数据模型支持吗？需要加什么？
+
+
+
+7-3
+### 作业 3：搭建一个简单的检索质量评估
+要求：
+- 准备 10 个测试问题 + 每个问题的 “正确 chunk ID”（人工标注）
+- 写一个脚本，跑 10 个问题，统计 “正确 chunk 是否在 Top-3 结果中”（Hit@3）
+- 分别测试 vector / bm25 / hybrid 三种方法的 Hit@3
+思考题：
+- Hit@3 = 70% 意味着什么？10 个问题里有 3 个找不到正确答案。
+- 怎么提高 Hit@3？（提示：调 chunk_size？调 vector_weight？加 Re-ranking？）
+
+
+7-4
+### 作业 4：用 Cross-encoder 替代 LLM 做 Re-ranking
+要求：
+- 安装 `sentence-transformers`
+- 用 `BAAI/bge-reranker-base` 模型替代 LLM 做 Re-ranking
+- 对比 LLM re-ranking 和 Cross-encoder re-ranking 的速度和效果
+思考题：
+- Cross-encoder 和 Bi-encoder（用于生成 Embedding 的模型）有什么区别？
+- 为什么 Cross-encoder 更准但更慢？
+
+
+7-5
+### 作业 5：思考题
+请用文字回答以下问题：
+1. 当前的 Embedding 在文档导入时同步生成。如果一个 500 页 PDF 切出 1000 个 chunks，批量 Embedding 可能需要 30 秒。这会阻塞上传请求吗？怎么改成异步？
+2. `score_threshold=0.3` 是一个 magic number。你怎么确定这个阈值是合理的？有没有自动调优的方法？
+3. 如果用户删除了一个文档（Document），它的 chunks 和 embeddings 会被 cascade 删除。但 pgvector 的 HNSW 索引会自动更新吗？还是需要手动 REINDEX？
+4. 当前的 BM25 用的是 PostgreSQL 内置的全文搜索。如果要支持中文 BM25，你需要做什么？（提示：`zhparser` 扩展、`jieba` 分词、Elasticsearch）
+5. Hybrid Search 的 `vector_weight=0.7, bm25_weight=0.3` 是固定的。有没有办法根据查询 “自动选择” 权重？（提示：如果查询包含型号/编号等精确信息，应该加大 BM25 权重）

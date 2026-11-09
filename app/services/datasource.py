@@ -59,6 +59,7 @@ async def create_datasource(
         database_name=req.database_name,
         username=req.username,
         encrypted_password=encrypt_value(req.password),
+        sensitive_columns=req.sensitive_columns,
     )
     db.add(ds)
     await db.flush()
@@ -191,6 +192,10 @@ async def update_datasource(
     # 只有用户明确传了 password 才重新加密
     if "password" in req.model_fields_set:
         ds.encrypted_password = encrypt_value(new_password)
+
+    # 敏感列配置不影响连接，不需要重新测试连接
+    if "sensitive_columns" in req.model_fields_set:
+        ds.sensitive_columns = req.sensitive_columns or []
 
     # 7. 写入数据库
     await db.flush()

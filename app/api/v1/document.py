@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -6,6 +6,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.schemas.document import (
     DocumentResponse,
+    DocumentUploadResponse,
     DocumentListResponse,
     DocumentChunksResponse,
     ChunkResponse,
@@ -15,14 +16,17 @@ from app.services import document as doc_service
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-@router.post("", response_model=DocumentResponse, status_code=201)
+@router.post("", response_model=DocumentUploadResponse, status_code=201)
 async def upload_document(
+    response: Response,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    doc = await doc_service.upload_document(db, current_user, file)
-    return doc
+    doc, is_duplicate = await doc_service.upload_document(db, current_user, file)
+    if is_duplicate:
+        response.status_code = 200  # 没有创建新资源，返回的是已有文档
+    return DocumentUploadResponse.model_validate(doc).model_copy(update={"is_duplicate": is_duplicate})
 
 
 @router.get("", response_model=DocumentListResponse)

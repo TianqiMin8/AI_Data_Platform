@@ -50,8 +50,15 @@ class SQLGenerationError(AppError):
 
 
 class SQLExecutionError(AppError):
-    def __init__(self, message: str = "SQL 执行失败"):
+    def __init__(
+        self,
+        message: str = "SQL 执行失败",
+        db_error: str = "",
+        error_type: str = "unknown",
+    ):
         super().__init__(code="SQL_EXECUTION_ERROR", message=message, status_code=500)
+        self.db_error = db_error      # 数据库原始报错，给 LLM 修正 SQL 用
+        self.error_type = error_type  # _classify_error 的分类结果
 
 
 class SQLValidationError(AppError):

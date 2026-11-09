@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, ForeignKey, Text, Float
+from sqlalchemy import String, Integer, ForeignKey, Text, Float, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -19,6 +19,11 @@ class Document(TimestampMixin, Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     total_characters: Mapped[int] = mapped_column(Integer, default=0)
+    # 文件内容的 SHA-256，用于上传去重。旧数据没有该值，所以允许为空
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # 去重查询是"某用户 + 某哈希"，建联合索引。不设唯一约束：失败的文档会保留，重新上传时会再建一条
+    __table_args__ = (Index("ix_documents_user_id_content_hash", "user_id", "content_hash"),)
 
     # 关系
     owner: Mapped["User"] = relationship()

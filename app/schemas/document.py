@@ -17,6 +17,11 @@ class DocumentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentUploadResponse(DocumentResponse):
+    # 内容与该用户已上传的某个文档完全相同时为 True，此时返回的是已有文档，没有重新处理
+    is_duplicate: bool = False
+
+
 class DocumentListResponse(BaseModel):
     items: list[DocumentResponse]
     total: int
@@ -27,6 +32,7 @@ class ChunkResponse(BaseModel):
     chunk_index: int
     content: str
     char_count: int
+    token_count: Optional[int] = None
     page_number: Optional[int] = None
     section_title: Optional[str] = None
     source: Optional[str] = None

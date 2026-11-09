@@ -1,6 +1,11 @@
 from datetime import datetime
 
 from app.core.logging import get_logger
+from app.sql_engine.token_budget import (
+    count_message_tokens,
+    fit_history_to_budget,
+    get_prompt_token_budget,
+)
 
 logger = get_logger(__name__)
 
@@ -53,9 +58,14 @@ def build_text_to_sql_messages(
     include_few_shot: bool = True,
     max_tables: int = 30,
     conversation_history: list[dict] | None = None,
-    max_history_turns: int = 5,
+    token_budget: int | None = None,
 ) -> list[dict]:
-    """构建发给 LLM 的完整 messages 列表，支持多轮对话上下文。"""
+    """构建发给 LLM 的完整 messages 列表，支持多轮对话上下文。
+
+    历史轮数是动态的：先算出 system / Schema / few-shot / 当前问题这些必须保留部分的 token，
+    剩下的预算（默认 context window 的 70%）从最新一轮往前装历史，装不下就丢掉更早的。
+    token_budget: 覆盖默认预算，主要用于测试。
+    """
 
     if len(schema_tables) > max_tables:
         logger.warning("prompt.schema_truncated", total=len(schema_tables), max=max_tables)
@@ -78,29 +88,36 @@ Context Awareness Rules:
 - When the user adds a filter like "only Q1" or "just this year", apply it to the previous query pattern
 - Always consider the full conversation context when generating SQL"""
 
-    messages = [{"role": "system", "content": system_content}]
+    prefix = [{"role": "system", "content": system_content}]
 
     # Few-shot 示例
     if include_few_shot:
         for example in FEW_SHOT_EXAMPLES:
-            messages.append({"role": "user", "content": example["question"]})
-            messages.append({"role": "assistant", "content": example["sql"]})
+            prefix.append({"role": "user", "content": example["question"]})
+            prefix.append({"role": "assistant", "content": example["sql"]})
 
-    # ✅ 多轮历史上下文
-    if conversation_history:
-        recent = conversation_history[-max_history_turns * 2:]  # 每轮 2 条（user + assistant）
-        for turn in recent:
-            messages.append(turn)
+    current_question = {"role": "user", "content": question}
 
-    # 当前问题
-    messages.append({"role": "user", "content": question})
+    # ✅ 多轮历史上下文：按 token 预算动态决定保留几轮
+    budget = token_budget or get_prompt_token_budget()
+    fixed_tokens = count_message_tokens(prefix + [current_question])
+    history, kept_turns = fit_history_to_budget(
+        conversation_history or [], fixed_tokens=fixed_tokens, budget=budget
+    )
+    if fixed_tokens > budget:
+        logger.warning("prompt.over_budget_without_history", fixed_tokens=fixed_tokens, budget=budget)
+
+    messages = prefix + history + [current_question]
 
     logger.info(
         "prompt.built",
         question=question,
         schema_tables=len(schema_tables),
-        history_turns=len(conversation_history or []) // 2,
+        history_turns=kept_turns,
+        history_turns_available=len([m for m in conversation_history or [] if m["role"] == "user"]),
         message_count=len(messages),
+        estimated_prompt_tokens=count_message_tokens(messages),
+        token_budget=budget,
     )
 
     return messages

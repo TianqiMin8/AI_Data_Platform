@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -177,6 +178,32 @@ class RecursiveChunker(BaseChunker):
             if chunk.strip():
                 chunks.append(chunk)
         return chunks
+
+
+# ── 去重 ──
+
+
+def content_hash(content: str) -> str:
+    """chunk 内容的 SHA-256。chunker 产出的内容已经 strip 过，这里不再做其他规范化：只认完全相同。"""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def deduplicate_chunks(chunks: list[ChunkResult]) -> tuple[list[ChunkResult], int]:
+    """同一文档内内容完全相同的 chunk 只保留第一次出现的那个，顺序不变。
+
+    用哈希集合判断是否见过：每个 chunk 只算一次哈希、O(1) 查找，
+    不需要和已有 chunk 逐个做全文比较。
+    返回 (去重后的 chunk, 去掉的数量)。
+    """
+    seen: set[str] = set()
+    unique: list[ChunkResult] = []
+    for chunk in chunks:
+        digest = content_hash(chunk.content)
+        if digest in seen:
+            continue
+        seen.add(digest)
+        unique.append(chunk)
+    return unique, len(chunks) - len(unique)
 
 
 # ── 工厂函数 ──

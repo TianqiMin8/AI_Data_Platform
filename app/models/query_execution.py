@@ -22,6 +22,7 @@ class QueryExecution(TimestampMixin, Base):
     row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     execution_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     # 关系
     message: Mapped["Message"] = relationship(back_populates="query_execution")
