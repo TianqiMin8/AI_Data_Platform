@@ -50,6 +50,16 @@ from app.config.settings import get_settings
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
 target_metadata = Base.metadata
+
+# 不受 ORM 管理的表（如测试用的业务表 demo_orders），autogenerate 时跳过，
+# 否则 Alembic 会把它们当成"多余的表"生成 drop_table
+IGNORED_TABLES = {"demo_orders"}
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and name in IGNORED_TABLES:
+        return False
+    return True
 ##
 
 
@@ -71,6 +81,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -92,7 +103,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

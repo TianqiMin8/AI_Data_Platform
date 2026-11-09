@@ -44,31 +44,39 @@ def format_schema_context(tables: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# 在 build_text_to_sql_messages 函数中新增 conversation_history 参数
+
 def build_text_to_sql_messages(
     question: str,
     schema_tables: list[dict],
     db_type: str = "postgresql",
     include_few_shot: bool = True,
     max_tables: int = 30,
+    conversation_history: list[dict] | None = None,
+    max_history_turns: int = 5,
 ) -> list[dict]:
-    """构建发给 LLM 的完整 messages 列表。"""
+    """构建发给 LLM 的完整 messages 列表，支持多轮对话上下文。"""
 
-    # 大 Schema 场景：限制表数量
     if len(schema_tables) > max_tables:
-        logger.warning(
-            "prompt.schema_truncated",
-            total_tables=len(schema_tables),
-            max_tables=max_tables,
-        )
+        logger.warning("prompt.schema_truncated", total=len(schema_tables), max=max_tables)
         schema_tables = schema_tables[:max_tables]
 
     current_date = datetime.now().strftime("%Y-%m-%d")
     system_content = SYSTEM_PROMPT.format(current_date=current_date)
     system_content += f"\n\nSQL Dialect:{db_type.upper()}"
 
-    # Schema Context
     schema_text = format_schema_context(schema_tables)
     system_content += f"\n\nDatabase Schema:\n{schema_text}"
+
+    # 多轮对话时追加上下文指令
+    if conversation_history:
+        system_content += """
+
+Context Awareness Rules:
+- The user may refer to previous questions and results using pronouns like "it", "that", "the same"
+- When the user says "show me more detail" or "break it down", they mean the previous query's result
+- When the user adds a filter like "only Q1" or "just this year", apply it to the previous query pattern
+- Always consider the full conversation context when generating SQL"""
 
     messages = [{"role": "system", "content": system_content}]
 
@@ -78,13 +86,20 @@ def build_text_to_sql_messages(
             messages.append({"role": "user", "content": example["question"]})
             messages.append({"role": "assistant", "content": example["sql"]})
 
-    # 用户实际问题
+    # ✅ 多轮历史上下文
+    if conversation_history:
+        recent = conversation_history[-max_history_turns * 2:]  # 每轮 2 条（user + assistant）
+        for turn in recent:
+            messages.append(turn)
+
+    # 当前问题
     messages.append({"role": "user", "content": question})
 
     logger.info(
         "prompt.built",
         question=question,
         schema_tables=len(schema_tables),
+        history_turns=len(conversation_history or []) // 2,
         message_count=len(messages),
     )
 

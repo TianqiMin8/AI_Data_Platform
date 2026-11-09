@@ -4,6 +4,7 @@ from app.models.user import User
 from app.models.datasource import DataSource
 from app.models.conversation import Conversation, Message
 from app.models.query_execution import QueryExecution
+from app.models.document import Document, Chunk
 
 __all__ = [
     "Base",
@@ -13,5 +14,7 @@ __all__ = [
     "Conversation",
     "Message",
     "QueryExecution",
+    "Document",
+    "Chunk",
 ]
 

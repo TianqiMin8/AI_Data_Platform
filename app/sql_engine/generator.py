@@ -31,6 +31,7 @@ async def generate_sql(
     question: str,
     schema_tables: list[dict],
     db_type: str = "postgresql",
+    conversation_history: list[dict] | None = None,
 ) -> tuple[str, LLMResponse]:
     """生成 SQL，返回 (清洗后的SQL, LLM完整响应)。"""
 
@@ -38,6 +39,7 @@ async def generate_sql(
         question=question,
         schema_tables=schema_tables,
         db_type=db_type,
+        conversation_history=conversation_history,
     )
 
     adapter = get_llm_adapter()

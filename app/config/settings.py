@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     sql_max_rows: int = 100
     sql_timeout_seconds: int = 15
 
+    # ── Chunking ──
+    chunk_strategy: str = "recursive"     # fixed / heading / recursive
+    chunk_size: int = 500
+    chunk_overlap: int = 50
+    max_file_size_mb: int = 20
+
+    redis_url: str = "redis://localhost:6379/0"
+    cache_ttl_seconds: int = 3600  # 缓存 1 小时
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"

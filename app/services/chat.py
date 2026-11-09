@@ -15,10 +15,12 @@ from app.schemas.chat import (
 from app.schemas.datasource import TableSchema
 from app.services.datasource import get_datasource
 from app.services.schema_inspector import introspect
+from app.sql_engine.cache import invalidate_cache
 from app.sql_engine.generator import generate_sql
 from app.sql_engine.executor import execute_sql
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import NotFoundError, SQLExecutionError, ValidationError
 from app.core.logging import get_logger
+from app.sql_engine.table_selector import select_relevant_tables
 
 logger = get_logger(__name__)
 
@@ -123,68 +125,138 @@ async def send_message(
         {"table_name": t.table_name, "columns": [c.model_dump() for c in t.columns]}
         for t in schema_result.tables
     ]
+    
 
-    # 4. 生成 SQL
-    sql, llm_response = await generate_sql(
+    # 3.3 Table Selection（大 Schema 优化）
+    selected_tables = await select_relevant_tables(
         question=question,
         schema_tables=schema_tables,
-        db_type=ds.db_type,
+        max_tables=10,
     )
 
-    # ✅ 4.5 新增：SQL 安全校验
-    from app.sql_engine.validator import validate_sql, ValidationResult
-
-    allowed_table_names = [t["table_name"] for t in schema_tables]
-    validation = validate_sql(
-        sql=sql,
-        allowed_tables=allowed_table_names,
+    # 后续步骤使用 selected_tables 替代 schema_tables
+    sql, llm_response = await generate_sql(
+        question=question,
+        schema_tables=selected_tables,  # ← 用精选的表
         db_type=ds.db_type,
+        conversation_history=conversation_history,
     )
 
-    if not validation.is_safe:
-        logger.warning(
-            "sql.validation.blocked",
-            level=validation.level,
-            reason=validation.reason,
-            sql=sql[:200],
+    # ✅ 但 allowed_tables 仍然用全量表（安全校验不能因为 Table Selection 放松）
+    allowed_table_names = [t["table_name"] for t in schema_tables]  # 全量
+    
+    # 3.5 构建多轮上下文
+    conversation_history = await _build_conversation_history(db, conv.id)
+
+    # app/services/chat.py send_message 中，步骤 4 之前新增缓存查询
+
+    from app.sql_engine.cache import get_cached_sql, set_cached_sql
+
+    # 3.8 查缓存
+    cached_sql = await get_cached_sql(ds.id, question)
+
+    if cached_sql:
+        # 缓存命中：跳过 LLM 调用，直接校验 + 执行
+        sql = cached_sql
+        llm_response = None
+
+        validation = validate_sql(sql=sql, allowed_tables=allowed_table_names, db_type=ds.db_type)
+        if not validation.is_safe:
+            # 缓存的 SQL 不再安全（可能 Schema 变了），清缓存走正常链路
+            await invalidate_cache(ds.id)
+            cached_sql = None
+
+    if not cached_sql:
+        # 4. 正常 LLM 生成 SQL
+
+        sql, llm_response = await generate_sql(
+            question=question,
+            schema_tables=schema_tables,
+            db_type=ds.db_type,
+            conversation_history = conversation_history
         )
 
-        # 存一条 assistant 消息告知用户
-        block_message = f"抱歉，生成的查询未通过安全校验：{validation.reason}。请换一种方式描述您的问题。"
-        assistant_msg = Message(
-            conversation_id=conv.id,
-            role="assistant",
-            content=block_message,
-        )
-        db.add(assistant_msg)
-        await db.flush()
+        # ✅ 4.5 新增：SQL 安全校验
+        from app.sql_engine.validator import validate_sql, ValidationResult
 
-        # 存 QueryExecution（记录被拦截的 SQL）
-        qe = QueryExecution(
-            message_id=assistant_msg.id,
-            datasource_id=ds.id,
-            generated_sql=sql,
-            status="blocked",
-            error_message=f"[{validation.level}]{validation.reason}:{validation.blocked_detail}",
+        allowed_table_names = [t["table_name"] for t in schema_tables]
+        validation = validate_sql(
+            sql=sql,
+            allowed_tables=allowed_table_names,
+            db_type=ds.db_type,
         )
-        db.add(qe)
-        await db.flush()
 
-        return ChatResponse(
-            message_id=assistant_msg.id,
-            content=block_message,
-            generated_sql=sql,
-            query_result=None,
-            model=llm_response.model,
-            usage={
-                "prompt_tokens": llm_response.usage.prompt_tokens,
-                "completion_tokens": llm_response.usage.completion_tokens,
-            },
-        )
+        if not validation.is_safe:
+            logger.warning(
+                "sql.validation.blocked",
+                level=validation.level,
+                reason=validation.reason,
+                sql=sql[:200],
+            )
+
+            # 存一条 assistant 消息告知用户
+            block_message = f"抱歉，生成的查询未通过安全校验：{validation.reason}。请换一种方式描述您的问题。"
+            assistant_msg = Message(
+                conversation_id=conv.id,
+                role="assistant",
+                content=block_message,
+            )
+            db.add(assistant_msg)
+            await db.flush()
+
+            # 存 QueryExecution（记录被拦截的 SQL）
+            qe = QueryExecution(
+                message_id=assistant_msg.id,
+                datasource_id=ds.id,
+                generated_sql=sql,
+                status="blocked",
+                error_message=f"[{validation.level}]{validation.reason}:{validation.blocked_detail}",
+            )
+            db.add(qe)
+            await db.flush()
+
+            return ChatResponse(
+                message_id=assistant_msg.id,
+                content=block_message,
+                generated_sql=sql,
+                query_result=None,
+                model=llm_response.model,
+                usage={
+                    "prompt_tokens": llm_response.usage.prompt_tokens,
+                    "completion_tokens": llm_response.usage.completion_tokens,
+                },
+            )
+        
+        # ✅ 生成成功后写入缓存
+        await set_cached_sql(ds.id, question, sql)
 
     # 5. 执行 SQL
-    exec_result = execute_sql(ds, sql)
+    try:
+        exec_result = execute_sql(ds, sql)
+    except SQLExecutionError as e:
+        # ✅ 执行失败 → 尝试自修复
+        logger.info("sql.execution_failed.attempting_retry", error=str(e))
 
+        from app.sql_engine.retry import retry_with_feedback
+
+        retry_result = await retry_with_feedback(
+            question=question,
+            failed_sql=sql,
+            error_message=str(e),
+            schema_tables=schema_tables,
+            db_type=ds.db_type,
+            conversation_history=conversation_history,
+            allowed_tables=allowed_table_names,
+        )
+
+        if retry_result:
+            sql, llm_response = retry_result
+            exec_result = execute_sql(ds, sql)  # 用修正后的 SQL 重新执行
+        else:
+            # 重试也失败了，返回错误信息
+            # error_msg = f"查询执行失败，自动修正也未成功：{str(e)}"
+            # ... 存 assistant 消息 + QueryExecution(status="failed") + 返回 ...
+            raise
     # ✅ 6. 升级：用 LLM 生成自然语言解释
     from app.sql_engine.explainer import explain_result
 
@@ -322,3 +394,48 @@ async def list_conversations(
         )
 
     return items, next_cursor
+
+# app/services/chat.py 新增辅助函数
+
+async def _build_conversation_history(
+    db: AsyncSession, conversation_id: int, max_turns: int = 5
+) -> list[dict]:
+    """从数据库读取最近 N 轮对话，构建 LLM messages 格式的历史。"""
+
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.desc())
+        .limit(max_turns * 2 + 2)  # 多取一些，后面截断
+    )
+    result = await db.execute(stmt)
+    messages = list(reversed(result.scalars().all()))
+
+    # 排除最后一条（当前用户刚发的消息）
+    if messages and messages[-1].role == "user":
+        messages = messages[:-1]
+
+    history = []
+    for msg in messages:
+        if msg.role == "user":
+            history.append({"role": "user", "content": msg.content})
+        elif msg.role == "assistant":
+            # 尝试从 QueryExecution 获取 SQL，拼成更精确的上下文
+            qe = await _get_query_execution_for_message(db, msg.id)
+            if qe and qe.generated_sql:
+                content = f"SQL:{qe.generated_sql}"
+                if qe.result_summary:
+                    content += f"\nResult:{qe.result_summary}"
+            else:
+                content = msg.content[:500]
+            history.append({"role": "assistant", "content": content})
+
+    return history[-max_turns * 2:]  # 只保留最近 N 轮
+
+
+async def _get_query_execution_for_message(
+    db: AsyncSession, message_id: int
+) -> QueryExecution | None:
+    stmt = select(QueryExecution).where(QueryExecution.message_id == message_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
